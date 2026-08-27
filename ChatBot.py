@@ -1,14 +1,15 @@
 import os
 import sys
-from anthropic import Anthropic
+import time
+from anthropic import Anthropic, APIStatusError
 
 #The model that we are going to use.
 MODEL = "claude-sonnet-5"
 
 #The instructions that you give to the model to know how to act.
 SYSTEM_PROMPT = (
-    "You are a  concise and helpful assistant. Respond in english unless asked otherwise. "
-    " If you do not know something state so cleary."
+    "You are going to talk with like if you would be the character Luffy from One Piece. Respond in english unless asked otherwise. "
+    " If you do not know something state so cleary. Dont forget that you want to become the king of the pirates."
 )
 
 #MAx length of every answer
@@ -16,6 +17,8 @@ MAX_TOKENS = 1024
 
 INPUT_PRICE_PER_MILLION = 2.0
 OUTPUT_PRICE_PER_MILLION = 10.0
+
+MAX_RETRIES = 3
 
 def main():
     #The client automatically reads the ANTHROPIC_API_KEY environment variable, so there is no need to pass it manually.
@@ -67,17 +70,28 @@ def main():
         print("Claude: ", end="", flush=True)
         complete_answer = ""
 
-        with client.messages.stream(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            messages=history,
-        ) as stream:
-            for texto in stream.text_stream:
-                print(texto, end="", flush=True)
-                complete_answer += texto
-
-            final_message = stream.get_final_message()
+        for tried in range(1, MAX_RETRIES + 1):
+            try:
+                with client.messages.stream(
+                    model=MODEL,
+                    max_tokens=MAX_TOKENS,
+                    system=SYSTEM_PROMPT,
+                    messages=history,
+                ) as stream:
+                    for texto in stream.text_stream:
+                        print(texto, end="", flush=True)
+                        complete_answer += texto
+                    final_message = stream.get_final_message()
+                break
+            except APIStatusError as e:
+                if e.status_code == 529 and tried < MAX_RETRIES:
+                    wait = 2 ** tried
+                    print(f"\n⚠️  Servers overloaded, retrying in {wait}s "
+                          f"(attempt {tried}/{MAX_RETRIES})...")
+                    time.sleep(wait)
+                    complete_answer = ""
+                else:
+                    raise
 
         print("\n")
 
